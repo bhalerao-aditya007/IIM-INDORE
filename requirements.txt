@@ -1,9 +1,26 @@
+# Core Framework
 streamlit==1.28.1
+
+# Computer Vision & Image Processing
+opencv-python==4.8.1.78
+Pillow==10.0.0
+numpy==1.24.3
+
+# Deep Learning
 torch==2.0.1
 torchaudio==2.0.2
-opencv-python==4.8.1.78
+
+# File Download from Google Drive
 gdown==4.7.1
-numpy==1.24.3
-Pillow==10.0.0
-tts==0.14.3
-pydub==0.25.1
+
+# Text-to-Speech (Optional - comment out if causing issues)
+# TTS requires espeak-ng system package on Streamlit Cloud
+# Replace with simpler alternative if needed
+pyttsx3==2.90
+
+# Audio Processing
+scipy==1.11.4
+
+# Utilities
+python-dotenv==1.0.0
+requests==2.31.0
