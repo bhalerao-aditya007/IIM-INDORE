@@ -3,16 +3,16 @@ import os
 import tempfile
 import gdown
 import pickle
-import cv2
-import numpy as np
+import json
 from pathlib import Path
 from datetime import datetime
 import logging
 from typing import Tuple, Optional
 import hashlib
-import pyttsx3
-from io import BytesIO
-import wave
+from PIL import Image
+import numpy as np
+import io
+import base64
 
 # ============================================================================
 # CONFIGURATION & INITIALIZATION
@@ -21,17 +21,21 @@ import wave
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Google Drive Model URLs (replace with your actual shareable links)
+# Google Drive Model URLs - YOUR MODELS THAT OUTPUT AUDIO
 MODEL_CONFIG = {
     "scenery": {
         "drive_url": "https://drive.google.com/uc?id=YOUR_SCENERY_MODEL_ID",
         "filename": "scenery_vision_model.pkl",
-        "description": "Scenery and static environment analysis model"
+        "description": "Image → Audio Model",
+        "input_type": "image",
+        "output_type": "audio"  # RETURNS AUDIO BYTES
     },
     "walking": {
         "drive_url": "https://drive.google.com/uc?id=YOUR_WALKING_MODEL_ID",
         "filename": "walking_video_model.pkl",
-        "description": "Dynamic movement and navigation analysis model"
+        "description": "Video → Audio Model",
+        "input_type": "video",
+        "output_type": "audio"  # RETURNS AUDIO BYTES
     }
 }
 
@@ -41,34 +45,33 @@ CONTENT_EN = {
     "app_subtitle": "Your Digital Eyes — Independent Navigation, Audible Descriptions",
     "mode_selection": "Select Operation Mode",
     "scenery_mode": "📸 Scenery Mode",
-    "scenery_desc": "Analyze static images of your surroundings",
+    "scenery_desc": "Get audio description of static images",
     "walking_mode": "🎥 Walking Mode",
-    "walking_desc": "Real-time video analysis for navigation",
+    "walking_desc": "Get audio guidance from video",
     "language": "Language / भाषा",
     "upload_image": "Upload Image",
     "upload_video": "Upload Video",
     "supported_formats_image": "Supported: JPG, PNG (Max 50MB)",
     "supported_formats_video": "Supported: MP4, WebM (Max 200MB)",
-    "processing": "🔄 Process Media",
-    "analyzing": "Analyzing with vision model...",
-    "generating_audio": "Generating audio description...",
-    "success": "✅ Description Generated Successfully",
+    "processing": "🎬 Generate Audio Description",
+    "analyzing": "🔍 Analyzing media with vision model...",
+    "generating_audio": "🔊 Generating audio description...",
+    "success": "✅ Audio Description Ready!",
     "error_title": "⚠️ Processing Error",
-    "error_no_model": "Model files could not be downloaded. Check your internet connection and model URLs.",
-    "error_invalid_file": "Invalid file format or corrupted file.",
-    "error_file_size": "File exceeds size limit.",
-    "error_processing": "An error occurred during processing.",
-    "error_tts": "Audio generation encountered an issue. Check system audio support.",
-    "playback_controls": "Audio Playback",
-    "metadata": "Description Metadata",
+    "error_no_model": "Model files could not be downloaded. Check your internet connection and verify model URLs are correct.",
+    "error_invalid_file": "Invalid file format. Please upload JPG/PNG for images or MP4/WebM for videos.",
+    "error_file_size": "File exceeds size limit. Images: max 50MB, Videos: max 200MB.",
+    "error_processing": "An error occurred during audio generation.",
+    "playback_controls": "Audio Description Results",
+    "metadata": "File Information",
     "mode_used": "Mode Used",
     "timestamp": "Generated At",
     "file_name": "Original File",
     "download_audio": "⬇️ Download Audio Description",
-    "new_analysis": "Perform New Analysis",
+    "new_analysis": "Generate New Description",
     "loading_model": "Loading vision model...",
-    "accessibility_note": "This platform is designed for independent navigation. Audio descriptions will help you understand your surroundings.",
-    "text_description": "Text Description",
+    "accessibility_note": "This platform converts your images and videos into audio descriptions. Simply upload your media and listen to the generated audio.",
+    "playback_label": "Listen to Description",
 }
 
 CONTENT_HI = {
@@ -76,34 +79,33 @@ CONTENT_HI = {
     "app_subtitle": "आपकी डिजिटल आंखें — स्वतंत्र नेविगेशन, सुनने योग्य विवरण",
     "mode_selection": "ऑपरेशन मोड चुनें",
     "scenery_mode": "📸 दृश्य मोड",
-    "scenery_desc": "अपने आसपास के स्थिर चित्रों का विश्लेषण करें",
+    "scenery_desc": "स्थिर छवियों का ऑडियो विवरण प्राप्त करें",
     "walking_mode": "🎥 चलने की मोड",
-    "walking_desc": "नेविगेशन के लिए वास्तविक समय वीडियो विश्लेषण",
+    "walking_desc": "वीडियो से ऑडियो मार्गदर्शन प्राप्त करें",
     "language": "Language / भाषा",
     "upload_image": "छवि अपलोड करें",
     "upload_video": "वीडियो अपलोड करें",
     "supported_formats_image": "समर्थित: JPG, PNG (अधिकतम 50MB)",
     "supported_formats_video": "समर्थित: MP4, WebM (अधिकतम 200MB)",
-    "processing": "🔄 मीडिया प्रोसेस करें",
-    "analyzing": "विजन मॉडल के साथ विश्लेषण किया जा रहा है...",
-    "generating_audio": "ऑडियो विवरण उत्पन्न किया जा रहा है...",
-    "success": "✅ विवरण सफलतापूर्वक उत्पन्न हुआ",
+    "processing": "🎬 ऑडियो विवरण उत्पन्न करें",
+    "analyzing": "🔍 माध्यम का विश्लेषण किया जा रहा है...",
+    "generating_audio": "🔊 ऑडियो विवरण उत्पन्न किया जा रहा है...",
+    "success": "✅ ऑडियो विवरण तैयार है!",
     "error_title": "⚠️ प्रसंस्करण त्रुटि",
-    "error_no_model": "मॉडल फ़ाइलें डाउनलोड नहीं की जा सकीं। अपने इंटरनेट कनेक्शन और मॉडल URLs की जांच करें।",
-    "error_invalid_file": "अमान्य फ़ाइल प्रारूप या क्षतिग्रस्त फ़ाइल।",
-    "error_file_size": "फ़ाइल आकार सीमा से अधिक है।",
-    "error_processing": "प्रसंस्करण के दौरान त्रुटि हुई।",
-    "error_tts": "ऑडियो उत्पन्न करने में समस्या हुई। सिस्टम ऑडियो समर्थन जांचें।",
-    "playback_controls": "ऑडियो प्लेबैक",
-    "metadata": "विवरण मेटाडेटा",
+    "error_no_model": "मॉडल फ़ाइलें डाउनलोड नहीं की जा सकीं। इंटरनेट कनेक्शन जांचें और मॉडल URLs सत्यापित करें।",
+    "error_invalid_file": "अमान्य फ़ाइल प्रारूप। छवियों के लिए JPG/PNG या वीडियो के लिए MP4/WebM अपलोड करें।",
+    "error_file_size": "फ़ाइल आकार सीमा से अधिक है। छवियां: अधिकतम 50MB, वीडियो: अधिकतम 200MB।",
+    "error_processing": "ऑडियो उत्पन्न करने में त्रुटि हुई।",
+    "playback_controls": "ऑडियो विवरण परिणाम",
+    "metadata": "फ़ाइल जानकारी",
     "mode_used": "उपयोग की गई मोड",
     "timestamp": "द्वारा उत्पन्न",
     "file_name": "मूल फ़ाइल",
     "download_audio": "⬇️ ऑडियो विवरण डाउनलोड करें",
-    "new_analysis": "नया विश्लेषण करें",
+    "new_analysis": "नया विवरण उत्पन्न करें",
     "loading_model": "विजन मॉडल लोड किया जा रहा है...",
-    "accessibility_note": "यह प्लेटफॉर्म स्वतंत्र नेविगेशन के लिए डिज़ाइन किया गया है। ऑडियो विवरण आपको अपने आसपास को समझने में मदद करेगा।",
-    "text_description": "पाठ विवरण",
+    "accessibility_note": "यह प्लेटफॉर्म आपकी छवियों और वीडियो को ऑडियो विवरण में परिवर्तित करता है। बस अपना माध्यम अपलोड करें और उत्पन्न ऑडियो सुनें।",
+    "playback_label": "विवरण सुनें",
 }
 
 # ============================================================================
@@ -124,59 +126,38 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     }
     
-    body {
-        background-color: #0a0e27;
-        color: #f0f0f0;
-    }
-    
-    .main {
-        background-color: #0a0e27;
-        padding: 2rem;
+    html, body, [data-testid="stAppViewContainer"] {
+        background-color: #0a0e27 !important;
+        color: #f0f0f0 !important;
     }
     
     .stButton > button {
-        background-color: #00d4ff;
-        color: #000;
-        border: none;
-        border-radius: 8px;
-        padding: 12px 24px;
-        font-weight: 700;
-        font-size: 16px;
-        cursor: pointer;
-        transition: all 0.3s ease;
+        background-color: #00d4ff !important;
+        color: #000 !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 14px 28px !important;
+        font-weight: 700 !important;
+        font-size: 16px !important;
+        cursor: pointer !important;
+        transition: all 0.3s ease !important;
     }
     
     .stButton > button:hover {
-        background-color: #00a3cc;
-        transform: translateY(-2px);
-        box-shadow: 0 8px 16px rgba(0, 212, 255, 0.3);
+        background-color: #00a3cc !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 16px rgba(0, 212, 255, 0.3) !important;
     }
     
     .stButton > button:focus {
-        outline: 3px solid #ffff00;
-        outline-offset: 2px;
+        outline: 3px solid #ffff00 !important;
+        outline-offset: 2px !important;
     }
     
-    .mode-card {
-        background: linear-gradient(135deg, #1a1f3a 0%, #2a2f5a 100%);
-        border: 3px solid #00d4ff;
-        border-radius: 12px;
-        padding: 24px;
-        margin: 16px 0;
-        cursor: pointer;
-        transition: all 0.3s ease;
-    }
-    
-    .mode-card:hover {
-        border-color: #00ffff;
-        box-shadow: 0 0 20px rgba(0, 212, 255, 0.4);
-        transform: translateY(-4px);
-    }
-    
-    h1, h2, h3 {
-        color: #00ffff;
-        font-weight: 700;
-        letter-spacing: 1px;
+    h1, h2, h3, h4, h5, h6 {
+        color: #00ffff !important;
+        font-weight: 700 !important;
+        letter-spacing: 1px !important;
     }
     
     .section-title {
@@ -185,51 +166,56 @@ st.markdown("""
         margin-bottom: 24px;
         padding-bottom: 12px;
         border-bottom: 3px solid #00d4ff;
+        color: #00ffff;
     }
     
     .success-message {
-        background-color: #0d3d1e;
-        border-left: 5px solid #00ff00;
-        color: #00ff00;
-        padding: 16px;
-        border-radius: 8px;
-        font-weight: 600;
+        background-color: #0d3d1e !important;
+        border-left: 5px solid #00ff00 !important;
+        color: #00ff00 !important;
+        padding: 16px !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
     }
     
     .error-message {
-        background-color: #3d0d0d;
-        border-left: 5px solid #ff3333;
-        color: #ff6666;
-        padding: 16px;
-        border-radius: 8px;
-        font-weight: 600;
+        background-color: #3d0d0d !important;
+        border-left: 5px solid #ff3333 !important;
+        color: #ff6666 !important;
+        padding: 16px !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
     }
     
     .info-message {
-        background-color: #0d1f3d;
-        border-left: 5px solid #00d4ff;
-        color: #00d4ff;
-        padding: 16px;
-        border-radius: 8px;
-        font-weight: 600;
+        background-color: #0d1f3d !important;
+        border-left: 5px solid #00d4ff !important;
+        color: #00d4ff !important;
+        padding: 16px !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
     }
     
-    .metadata-table {
-        background-color: #1a1f3a;
-        border: 2px solid #00d4ff;
-        border-radius: 8px;
-        padding: 16px;
-        margin: 16px 0;
+    .metadata-box {
+        background-color: #1a1f3a !important;
+        border: 2px solid #00d4ff !important;
+        border-radius: 8px !important;
+        padding: 16px !important;
+        margin: 16px 0 !important;
     }
     
-    .stSlider > label {
-        font-weight: 700;
-        font-size: 16px;
+    .stRadio > label {
+        font-weight: 700 !important;
+        font-size: 16px !important;
+        color: #f0f0f0 !important;
     }
     
-    .stSelectbox > label, .stRadio > label {
-        font-weight: 700;
-        font-size: 16px;
+    .audio-player {
+        background-color: #1a1f3a !important;
+        border: 2px solid #00d4ff !important;
+        border-radius: 8px !important;
+        padding: 20px !important;
+        margin: 16px 0 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -264,11 +250,10 @@ def download_model(mode: str) -> Optional[object]:
         temp_dir = tempfile.gettempdir()
         model_path = os.path.join(temp_dir, config["filename"])
         
-        # Check if model already cached locally
+        # Check if model already cached
         if not os.path.exists(model_path):
             logger.info(f"Downloading {mode} model from Google Drive...")
-            with st.spinner(get_text("loading_model")):
-                gdown.download(config["drive_url"], model_path, quiet=False)
+            gdown.download(config["drive_url"], model_path, quiet=False)
         
         logger.info(f"Loading {mode} model from {model_path}")
         with open(model_path, 'rb') as f:
@@ -277,7 +262,6 @@ def download_model(mode: str) -> Optional[object]:
         return model
     except Exception as e:
         logger.error(f"Model download/load error for {mode}: {str(e)}")
-        st.error(f"{get_text('error_no_model')}\n\nDebug: {str(e)}")
         return None
 
 # ============================================================================
@@ -303,116 +287,73 @@ def validate_file(uploaded_file, mode: str) -> Tuple[bool, str]:
     
     return True, "OK"
 
-def extract_frames_from_video(video_path: str, sample_rate: int = 2) -> list:
-    """Extract frames from video file at specified sample rate"""
-    cap = cv2.VideoCapture(video_path)
-    frames = []
-    frame_count = 0
-    
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        if frame_count % sample_rate == 0:
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(frame_rgb)
-        
-        frame_count += 1
-    
-    cap.release()
-    return frames
-
-def process_scenery_image(image_path: str, model) -> str:
-    """Process image through scenery model and generate description"""
+def read_image_as_array(image_path: str) -> np.ndarray:
+    """Read image and convert to numpy array"""
     try:
-        # Read image
-        image = cv2.imread(image_path)
-        if image is None:
-            raise ValueError("Could not read image file")
+        image = Image.open(image_path)
+        # Convert to RGB if necessary
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        return np.array(image, dtype=np.uint8)
+    except Exception as e:
+        logger.error(f"Image reading error: {str(e)}")
+        raise
+
+def read_video_file(video_path: str) -> bytes:
+    """Read video file as bytes"""
+    try:
+        with open(video_path, 'rb') as f:
+            return f.read()
+    except Exception as e:
+        logger.error(f"Video reading error: {str(e)}")
+        raise
+
+def process_scenery_image(image_path: str, model) -> bytes:
+    """
+    Process image through scenery model.
+    Model takes image as input and RETURNS AUDIO BYTES.
+    """
+    try:
+        # Read image as numpy array
+        image_array = read_image_as_array(image_path)
         
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        logger.info(f"Image shape: {image_array.shape}")
         
-        # Resize for model consistency
-        image_resized = cv2.resize(image_rgb, (512, 512))
-        image_normalized = image_resized.astype(np.float32) / 255.0
+        # Call model - expects image array, returns AUDIO BYTES
+        audio_bytes = model.predict(image_array)
         
-        # Model inference - adapt to your model's interface
-        try:
-            description = model.predict(image_normalized)
-        except AttributeError:
-            # Fallback: model might require different call signature
-            description = "Image analyzed successfully. Please configure model output format."
+        if not isinstance(audio_bytes, bytes):
+            raise TypeError(f"Model returned {type(audio_bytes)}, expected bytes")
         
-        return str(description)
+        logger.info(f"Audio generated: {len(audio_bytes)} bytes")
+        return audio_bytes
+        
     except Exception as e:
         logger.error(f"Scenery processing error: {str(e)}")
         raise
 
-def process_walking_video(video_path: str, model) -> str:
-    """Process video through walking model and generate description"""
+def process_walking_video(video_path: str, model) -> bytes:
+    """
+    Process video through walking model.
+    Model takes video as input and RETURNS AUDIO BYTES.
+    """
     try:
-        # Extract frames
-        frames = extract_frames_from_video(video_path, sample_rate=5)
+        # Read video as bytes
+        video_bytes = read_video_file(video_path)
         
-        if not frames:
-            raise ValueError("No frames extracted from video")
+        logger.info(f"Video size: {len(video_bytes)} bytes")
         
-        # Resize frames
-        processed_frames = []
-        for frame in frames[:10]:  # Limit to first 10 sampled frames to save memory
-            resized = cv2.resize(frame, (512, 512))
-            normalized = resized.astype(np.float32) / 255.0
-            processed_frames.append(normalized)
+        # Call model - expects video bytes, returns AUDIO BYTES
+        audio_bytes = model.predict(video_bytes)
         
-        # Model inference - adapt to your model's interface
-        try:
-            description = model.predict(np.array(processed_frames))
-        except AttributeError:
-            # Fallback
-            description = "Video analyzed successfully. Please configure model output format."
+        if not isinstance(audio_bytes, bytes):
+            raise TypeError(f"Model returned {type(audio_bytes)}, expected bytes")
         
-        return str(description)
+        logger.info(f"Audio generated: {len(audio_bytes)} bytes")
+        return audio_bytes
+        
     except Exception as e:
         logger.error(f"Walking processing error: {str(e)}")
-        raise
-
-def generate_audio_from_text(text: str, lang: str = "en") -> bytes:
-    """Generate speech audio from text description using pyttsx3"""
-    try:
-        # Initialize TTS engine
-        engine = pyttsx3.init()
-        
-        # Set properties based on language
-        engine.setProperty('rate', 150)  # Speech rate (words per minute)
-        engine.setProperty('volume', 0.9)  # Volume (0.0 to 1.0)
-        
-        # Set voice based on language (if available)
-        if lang == "hi":
-            # Try to find Hindi voice
-            voices = engine.getProperty('voices')
-            for voice in voices:
-                if 'hindi' in voice.name.lower() or 'hi_' in voice.id.lower():
-                    engine.setProperty('voice', voice.id)
-                    break
-        
-        # Save to bytes buffer
-        temp_audio_path = os.path.join(tempfile.gettempdir(), "temp_audio.wav")
-        engine.save_to_file(text, temp_audio_path)
-        engine.runAndWait()
-        
-        # Read audio file
-        with open(temp_audio_path, 'rb') as f:
-            audio_bytes = f.read()
-        
-        # Cleanup
-        if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
-        
-        return audio_bytes
-    
-    except Exception as e:
-        logger.error(f"TTS generation error: {str(e)}")
         raise
 
 # ============================================================================
@@ -459,7 +400,6 @@ with mode_col1:
         f"{get_text('scenery_mode')}\n\n{get_text('scenery_desc')}",
         key="btn_scenery",
         use_container_width=True,
-        help="Static image analysis"
     ):
         st.session_state.mode = "scenery"
         st.rerun()
@@ -469,7 +409,6 @@ with mode_col2:
         f"{get_text('walking_mode')}\n\n{get_text('walking_desc')}",
         key="btn_walking",
         use_container_width=True,
-        help="Dynamic video analysis"
     ):
         st.session_state.mode = "walking"
         st.rerun()
@@ -488,14 +427,12 @@ if st.session_state.mode:
     if st.session_state.mode == "scenery":
         uploaded_file = st.file_uploader(
             get_text("upload_image"),
-            type=['jpg', 'jpeg', 'png'],
-            help=get_text("supported_formats_image")
+            type=['jpg', 'jpeg', 'png']
         )
     else:
         uploaded_file = st.file_uploader(
             get_text("upload_video"),
-            type=['mp4', 'webm'],
-            help=get_text("supported_formats_video")
+            type=['mp4', 'webm']
         )
     
     if uploaded_file:
@@ -503,9 +440,12 @@ if st.session_state.mode:
         is_valid, validation_msg = validate_file(uploaded_file, st.session_state.mode)
         
         if not is_valid:
-            st.markdown(f"<div class='error-message'>{validation_msg}</div>", 
-                       unsafe_allow_html=True)
+            st.error(validation_msg)
         else:
+            # Show file info
+            file_size_mb = uploaded_file.size / 1024 / 1024
+            st.info(f"📄 {uploaded_file.name} ({file_size_mb:.2f} MB)")
+            
             # Save uploaded file temporarily
             temp_dir = tempfile.gettempdir()
             temp_file_path = os.path.join(temp_dir, uploaded_file.name)
@@ -514,35 +454,29 @@ if st.session_state.mode:
                 f.write(uploaded_file.getbuffer())
             
             # Process button
-            if st.button(get_text("processing"), use_container_width=True):
+            if st.button(get_text("processing"), use_container_width=True, key="process_btn"):
                 try:
-                    # Load model
                     progress_bar = st.progress(0)
                     
-                    st.info(get_text("analyzing"))
-                    progress_bar.progress(30)
-                    
-                    model = download_model(st.session_state.mode)
-                    
-                    if model is None:
-                        raise ValueError("Model loading failed")
-                    
-                    progress_bar.progress(60)
-                    
-                    # Process media
-                    if st.session_state.mode == "scenery":
-                        description = process_scenery_image(temp_file_path, model)
-                    else:
-                        description = process_walking_video(temp_file_path, model)
-                    
-                    progress_bar.progress(75)
-                    
-                    # Generate audio
-                    st.info(get_text("generating_audio"))
-                    lang_code = "hi" if st.session_state.language == "HI" else "en"
-                    audio_bytes = generate_audio_from_text(description, lang=lang_code)
-                    
-                    progress_bar.progress(95)
+                    # Load model
+                    with st.spinner(get_text("analyzing")):
+                        progress_bar.progress(25)
+                        model = download_model(st.session_state.mode)
+                        
+                        if model is None:
+                            st.error(get_text("error_no_model"))
+                            st.stop()
+                        
+                        progress_bar.progress(50)
+                        
+                        # Process media - model outputs AUDIO BYTES
+                        with st.spinner(get_text("generating_audio")):
+                            if st.session_state.mode == "scenery":
+                                audio_bytes = process_scenery_image(temp_file_path, model)
+                            else:
+                                audio_bytes = process_walking_video(temp_file_path, model)
+                        
+                        progress_bar.progress(90)
                     
                     # Store in session state
                     st.session_state.audio_data = audio_bytes
@@ -550,25 +484,23 @@ if st.session_state.mode:
                         "mode": st.session_state.mode,
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "file_name": uploaded_file.name,
-                        "description": description
+                        "file_size": f"{file_size_mb:.2f} MB",
+                        "audio_size": f"{len(audio_bytes) / 1024 / 1024:.2f} MB"
                     }
                     
                     progress_bar.progress(100)
-                    
-                    # Success message
                     st.success(get_text("success"))
                     
                 except Exception as e:
                     logger.error(f"Processing failed: {str(e)}")
-                    st.markdown(f"<div class='error-message'>{get_text('error_processing')}\n\n{str(e)}</div>", 
-                               unsafe_allow_html=True)
+                    st.error(f"{get_text('error_processing')}\n\nDetails: {str(e)}")
                 finally:
                     # Clean up temp file
                     if os.path.exists(temp_file_path):
                         os.remove(temp_file_path)
 
 # ============================================================================
-# RESULTS SECTION
+# RESULTS SECTION - AUDIO PLAYBACK
 # ============================================================================
 
 if st.session_state.audio_data and st.session_state.metadata:
@@ -576,33 +508,32 @@ if st.session_state.audio_data and st.session_state.metadata:
     st.markdown(f"<h2 class='section-title'>{get_text('playback_controls')}</h2>", 
                 unsafe_allow_html=True)
     
-    # Audio player
+    # Audio Player
+    st.markdown(f"### 🎵 {get_text('playback_label')}")
     st.audio(st.session_state.audio_data, format="audio/wav")
     
-    # Download button
-    st.download_button(
-        label=get_text("download_audio"),
-        data=st.session_state.audio_data,
-        file_name=f"description_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav",
-        mime="audio/wav",
-        use_container_width=True
-    )
+    # Download Button
+    col_download = st.columns(1)[0]
+    with col_download:
+        st.download_button(
+            label=get_text("download_audio"),
+            data=st.session_state.audio_data,
+            file_name=f"description_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav",
+            mime="audio/wav",
+            use_container_width=True
+        )
     
     # Metadata
     st.markdown("---")
-    st.markdown(f"<h3 style='color: #00ffff;'>{get_text('metadata')}</h3>", 
-                unsafe_allow_html=True)
+    st.markdown(f"### 📋 {get_text('metadata')}")
     
-    # Text Description
-    st.markdown(f"**{get_text('text_description')}:**")
-    st.markdown(f"> {st.session_state.metadata['description']}")
-    
-    # Metadata Table
     metadata_html = f"""
-    <div class='metadata-table'>
+    <div class='metadata-box'>
         <p><strong>{get_text('mode_used')}:</strong> {get_text('scenery_mode') if st.session_state.metadata['mode'] == 'scenery' else get_text('walking_mode')}</p>
         <p><strong>{get_text('timestamp')}:</strong> {st.session_state.metadata['timestamp']}</p>
         <p><strong>{get_text('file_name')}:</strong> {st.session_state.metadata['file_name']}</p>
+        <p><strong>📁 Input Size:</strong> {st.session_state.metadata['file_size']}</p>
+        <p><strong>🔊 Audio Size:</strong> {st.session_state.metadata['audio_size']}</p>
     </div>
     """
     st.markdown(metadata_html, unsafe_allow_html=True)
