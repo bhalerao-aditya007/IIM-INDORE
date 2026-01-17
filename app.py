@@ -2,7 +2,7 @@ import streamlit as st
 import os
 import tempfile
 import gdown
-import pickle
+import joblib
 import json
 from pathlib import Path
 from datetime import datetime
@@ -256,8 +256,7 @@ def download_model(mode: str) -> Optional[object]:
             gdown.download(config["drive_url"], model_path, quiet=False)
         
         logger.info(f"Loading {mode} model from {model_path}")
-        with open(model_path, 'rb') as f:
-            model = pickle.load(f)
+        model = joblib.load(model_path)  # Changed from pickle.load
         
         return model
     except Exception as e:
