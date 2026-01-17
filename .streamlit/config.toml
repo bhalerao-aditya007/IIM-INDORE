@@ -12,3 +12,7 @@ toolbarMode = "minimal"
 [server]
 maxUploadSize = 200
 enableXsrfProtection = true
+
+[models]
+scenery_drive_id = "1wE1W33tQ0WUqGBK8ISb2eeSrFUG3vJJm"
+walking_drive_id = "13OzMZ2SYI1pZIFEDs-frk9WcW-D_ndyG"
