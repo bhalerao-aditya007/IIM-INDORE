@@ -1,5 +1,5 @@
 streamlit
-
+joblib
 Pillow
 numpy
 torch
