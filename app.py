@@ -24,14 +24,14 @@ logger = logging.getLogger(__name__)
 # Google Drive Model URLs - YOUR MODELS THAT OUTPUT AUDIO
 MODEL_CONFIG = {
     "scenery": {
-        "drive_url": "https://drive.google.com/uc?id=YOUR_SCENERY_MODEL_ID",
+        "drive_url": "https://drive.google.com/uc?id=13OzMZ2SYI1pZIFEDs-frk9WcW-D_ndyG",
         "filename": "scenery_vision_model.pkl",
         "description": "Image → Audio Model",
         "input_type": "image",
         "output_type": "audio"  # RETURNS AUDIO BYTES
     },
     "walking": {
-        "drive_url": "https://drive.google.com/uc?id=YOUR_WALKING_MODEL_ID",
+        "drive_url": "https://drive.google.com/uc?id=1wE1W33tQ0WUqGBK8ISb2eeSrFUG3vJJm",
         "filename": "walking_video_model.pkl",
         "description": "Video → Audio Model",
         "input_type": "video",
